@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Image as ImageIcon } from 'lucide-react';
+import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+// 輔助函式：確保圖片網址是完整的 (處理上傳的相對路徑)
+const getFullImageUrl = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return `${API_BASE}${url}`;
+};
 
 export default function App() {
   const [recipes, setRecipes] = useState([]);
@@ -9,11 +16,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
 
-  // Modal 狀態 (null 表示關閉，'add' 表示新增，物件表示編輯的菜色)
   const [activeModal, setActiveModal] = useState(null);
   const [formData, setFormData] = useState({ name: '', imageUrl: '', sourceUrl: '' });
 
-  // 取得菜單資料
   const fetchRecipes = async () => {
     try {
       setLoading(true);
@@ -31,7 +36,6 @@ export default function App() {
     fetchRecipes();
   }, []);
 
-  // 打開 modal (新增或編輯)
   const openModal = (recipe = null) => {
     if (recipe) {
       setActiveModal(recipe);
@@ -47,7 +51,6 @@ export default function App() {
     setFormData({ name: '', imageUrl: '', sourceUrl: '' });
   };
 
-  // 處理照片檔案上傳
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -74,14 +77,12 @@ export default function App() {
     }
   };
 
-  // 送出表單 (新增或修改)
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) return;
 
     try {
       if (activeModal === 'add') {
-        // 新增
         const res = await fetch(`${API_BASE}/api/recipes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -89,7 +90,6 @@ export default function App() {
         });
         if (res.ok) fetchRecipes();
       } else {
-        // 修改
         const res = await fetch(`${API_BASE}/api/recipes/${activeModal.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -103,7 +103,6 @@ export default function App() {
     }
   };
 
-  // 切換點餐狀態
   const toggleOrder = async (id, currentStatus) => {
     try {
       const res = await fetch(`${API_BASE}/api/recipes/${id}/order`, {
@@ -119,7 +118,6 @@ export default function App() {
     }
   };
 
-  // 重置今日點餐
   const resetOrders = async () => {
     if (!confirm('確定要清空今日所有點餐嗎？')) return;
     try {
@@ -130,7 +128,6 @@ export default function App() {
     }
   };
 
-  // 刪除菜色
   const deleteRecipe = async (id) => {
     if (!confirm('確定要刪除這道菜嗎？')) return;
     try {
@@ -145,7 +142,6 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: '600px', margin: '0 auto', padding: '16px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      {/* 頂部 Header & 模式切換 */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h1 style={{ fontSize: '20px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
           {isCookingMode ? <ChefHat color="#e65100" /> : <Utensils color="#2e7d32" />}
@@ -167,7 +163,6 @@ export default function App() {
         </button>
       </header>
 
-      {/* 工人烹飪模式 */}
       {isCookingMode ? (
         <div>
           <div style={{ background: '#fff3e0', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', color: '#e65100' }}>
@@ -179,7 +174,7 @@ export default function App() {
             orderedRecipes.map(item => (
               <div key={item.id} style={{ border: '2px solid #ffe0b2', borderRadius: '12px', padding: '16px', marginBottom: '16px', background: '#fff' }}>
                 {item.imageUrl && (
-                  <img src={item.imageUrl} alt={item.name} style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '12px' }} />
+                  <img src={getFullImageUrl(item.imageUrl)} alt={item.name} style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '12px' }} />
                 )}
                 <h2 style={{ margin: '0 0 12px 0', fontSize: '22px', color: '#333' }}>{item.name}</h2>
                 {item.sourceUrl && (
@@ -207,7 +202,6 @@ export default function App() {
           )}
         </div>
       ) : (
-        /* 家庭點餐模式 */
         <div>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
             <button
@@ -246,7 +240,7 @@ export default function App() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, cursor: 'pointer' }} onClick={() => toggleOrder(item.id, item.isOrdered)}>
                     {item.isOrdered ? <CheckCircle2 color="#2e7d32" /> : <Circle color="#ccc" />}
                     {item.imageUrl && (
-                      <img src={item.imageUrl} alt={item.name} style={{ width: '50px', height: '50px', borderRadius: '6px', objectFit: 'cover' }} />
+                      <img src={getFullImageUrl(item.imageUrl)} alt={item.name} style={{ width: '50px', height: '50px', borderRadius: '6px', objectFit: 'cover' }} />
                     )}
                     <div>
                       <div style={{ fontWeight: 'bold', color: item.isOrdered ? '#2e7d32' : '#333' }}>{item.name}</div>
@@ -272,7 +266,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 新增 / 編輯菜色 Modal 彈窗 */}
       {activeModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '16px', zIndex: 1000 }}>
           <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '400px', maxHeight: '90vh', overflowY: 'auto' }}>
@@ -290,12 +283,11 @@ export default function App() {
                 />
               </div>
 
-              {/* 相片上傳與預覽區塊 */}
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>菜色照片</label>
                 {formData.imageUrl && (
                   <div style={{ marginBottom: '8px' }}>
-                    <img src={formData.imageUrl} alt="Preview" style={{ width: '100%', height: '140px', objectFit: 'cover', borderRadius: '6px' }} />
+                    <img src={getFullImageUrl(formData.imageUrl)} alt="Preview" style={{ width: '100%', height: '140px', objectFit: 'cover', borderRadius: '6px' }} />
                   </div>
                 )}
                 
