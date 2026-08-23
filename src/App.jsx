@@ -66,8 +66,12 @@ export default function App() {
       });
       const result = await res.json();
       if (res.ok && result.imageUrl) {
-        setFormData(prev => ({ ...prev, imageUrl: result.imageUrl }));
-      } else {
+  	const fullUrl = result.imageUrl.startsWith('http') 
+   	 ? result.imageUrl 
+    	 : `${API_BASE}${result.imageUrl}`;
+
+ 	setFormData(prev => ({ ...prev, imageUrl: fullUrl }));
+	}else {
         alert('照片上傳失敗');
       }
     } catch (err) {
@@ -299,7 +303,7 @@ export default function App() {
                 </div>
 
                 <input
-                  type="url"
+                  type="text"
                   value={formData.imageUrl}
                   onChange={e => setFormData({ ...formData, imageUrl: e.target.value })}
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box', fontSize: '12px' }}
