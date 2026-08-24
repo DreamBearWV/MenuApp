@@ -13,7 +13,7 @@ const compressAndConvertToBase64 = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800;
+        const MAX_WIDTH = 600; // 原為 800，改為 600
         let width = img.width;
         let height = img.height;
 
@@ -27,7 +27,7 @@ const compressAndConvertToBase64 = (file) => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
       };
       img.onerror = (error) => reject(error);
     };
