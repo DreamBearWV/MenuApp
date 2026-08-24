@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Languages } from 'lucide-react';
+import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Languages, Globe } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 const CATEGORIES = ['主菜', '蔬菜', '湯品', '點心/其他'];
@@ -57,6 +57,16 @@ export default function App() {
   const [translating, setTranslating] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('全部');
 
+  // 🌐 語言選擇記憶：優先讀取 LocalStorage，預設為中文 'zh' ('zh' | 'en' | 'id')
+  const [lang, setLang] = useState(() => {
+    return localStorage.getItem('app_lang') || 'zh';
+  });
+
+  const handleLangChange = (newLang) => {
+    setLang(newLang);
+    localStorage.setItem('app_lang', newLang);
+  };
+
   // 模式記憶：優先讀取 URL 參數 ?mode=cook，其次讀取 LocalStorage
   const [isCookingMode, setIsCookingMode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -84,7 +94,14 @@ export default function App() {
     });
   };
 
-  // 抓取菜單資料 (首次載入顯示 loading，後續背景自動更新不跳出 loading)
+  // 根據選擇的語言取得菜色名稱 (支援自動降級退回中文)
+  const getDishName = (item) => {
+    if (lang === 'en') return item.nameEn || item.name;
+    if (lang === 'id') return item.nameId || item.nameEn || item.name;
+    return item.name;
+  };
+
+  // 抓取菜單資料
   const fetchRecipes = async (isInitial = false) => {
     try {
       if (isInitial) setLoading(true);
@@ -100,36 +117,29 @@ export default function App() {
     }
   };
 
-  // 💡 自動更新機制：首次載入 + 每 5 秒自動在背景重新整理最新菜單
   // 💡 自動更新機制（結合 Page Visibility API 省電優化）
-useEffect(() => {
-  // 1. 首次載入頁面時，抓取資料 (顯示 loading)
-  fetchRecipes(true);
+  useEffect(() => {
+    fetchRecipes(true);
 
-  // 2. 定時器：每 5 秒觸發一次
-  const timer = setInterval(() => {
-    // 🛑 省電核心：如果畫面被隱藏（螢幕關閉、切換分頁），直接跳過更新
-    if (document.hidden) {
-      return;
-    }
-    fetchRecipes(false); // 在背景靜默更新
-  }, 5000);
-
-  // 3. 監聽頁面切換事件：當使用者重新回到這個網頁時，立刻抓取最新資料！
-  const handleVisibilityChange = () => {
-    if (!document.hidden) {
+    const timer = setInterval(() => {
+      // 畫面隱藏（關屏/切分頁）時暫停背景抓取，達到省電效果
+      if (document.hidden) return;
       fetchRecipes(false);
-    }
-  };
+    }, 5000);
 
-  document.addEventListener('visibilitychange', handleVisibilityChange);
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchRecipes(false);
+      }
+    };
 
-  // 4. 清除機制：元件卸載時清除定時器與監聽器
-  return () => {
-    clearInterval(timer);
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-  };
-}, []);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const openModal = (recipe = null) => {
     if (recipe) {
@@ -153,7 +163,6 @@ useEffect(() => {
     setFormData({ name: '', nameEn: '', nameId: '', imageUrl: '', sourceUrl: '', category: '主菜' });
   };
 
-  // 自動將中文名稱翻譯為英文與印尼文
   const handleAutoTranslate = async () => {
     if (!formData.name.trim()) {
       alert('請先輸入中文菜色名稱！');
@@ -224,7 +233,6 @@ useEffect(() => {
 
   const toggleOrder = async (id, currentStatus) => {
     try {
-      // 先在前端畫面上即時切換勾選狀態，提升滑順度
       setRecipes(recipes.map(r => r.id === id ? { ...r, isOrdered: !currentStatus } : r));
 
       const res = await fetch(`${API_BASE}/api/recipes/${id}/order`, {
@@ -236,7 +244,7 @@ useEffect(() => {
         body: JSON.stringify({ isOrdered: !currentStatus })
       });
       if (!res.ok) {
-        fetchRecipes(false); // 若失敗則還原
+        fetchRecipes(false);
       }
     } catch (err) {
       alert('更新失敗！');
@@ -278,32 +286,59 @@ useEffect(() => {
 
   return (
     <div style={{ maxWidth: '600px', margin: '0 auto', padding: '16px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '20px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* 頁首選單欄位 */}
+      <header style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+        <h1 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
           {isCookingMode ? <ChefHat color="#e65100" /> : <Utensils color="#2e7d32" />}
           {isCookingMode ? '今日烹飪菜單 (Kitchen)' : '家庭點餐菜單'}
         </h1>
-        <button
-          onClick={toggleMode}
-          style={{
-            padding: '8px 12px',
-            borderRadius: '20px',
-            border: 'none',
-            background: isCookingMode ? '#ffe0b2' : '#e8f5e9',
-            color: isCookingMode ? '#e65100' : '#2e7d32',
-            fontWeight: 'bold',
-            cursor: 'pointer'
-          }}
-        >
-          切換至 {isCookingMode ? '點餐模式' : '工人烹飪模式'}
-        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* 🌐 語言選單 (具記憶功能) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#f5f5f5', padding: '4px 8px', borderRadius: '16px', border: '1px solid #ddd' }}>
+            <Globe size={14} color="#666" />
+            <select
+              value={lang}
+              onChange={(e) => handleLangChange(e.target.value)}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                fontSize: '13px',
+                fontWeight: 'bold',
+                outline: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+              <option value="id">Bahasa Indonesia</option>
+            </select>
+          </div>
+
+          {/* 模式切換按鈕 */}
+          <button
+            onClick={toggleMode}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '20px',
+              border: 'none',
+              background: isCookingMode ? '#ffe0b2' : '#e8f5e9',
+              color: isCookingMode ? '#e65100' : '#2e7d32',
+              fontWeight: 'bold',
+              fontSize: '13px',
+              cursor: 'pointer'
+            }}
+          >
+            {isCookingMode ? '切換至點餐模式' : '工人烹飪模式'}
+          </button>
+        </div>
       </header>
 
       {/* 工人烹飪模式 */}
       {isCookingMode ? (
         <div>
           <div style={{ background: '#fff3e0', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', color: '#e65100' }}>
-            👨‍🍳 提示：以下為今日已點菜色，每 5 秒自動同步更新 (Dishes to cook today)
+            👨‍🍳 提示：以下為今日已點菜色 (Dishes to cook today)
           </div>
           {orderedRecipes.length === 0 ? (
             <p style={{ textAlign: 'center', color: '#888', marginTop: '40px' }}>今日尚未點菜 (No dishes ordered today)</p>
@@ -311,18 +346,14 @@ useEffect(() => {
             orderedRecipes.map(item => (
               <div key={item.id} style={{ border: '2px solid #ffe0b2', borderRadius: '12px', padding: '16px', marginBottom: '16px', background: '#fff' }}>
                 {item.imageUrl && (
-                  <img src={getFullImageUrl(item.imageUrl)} alt={item.name} style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '12px' }} />
+                  <img src={getFullImageUrl(item.imageUrl)} alt={getDishName(item)} style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '12px' }} />
                 )}
                 
-                {/* 烹飪模式：優先以大字顯示印尼文與英文 */}
+                {/* 烹飪模式：根據選取的語言以大字顯示菜名 */}
                 <div style={{ marginBottom: '8px' }}>
                   <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#e65100' }}>
-                    {item.nameId || item.nameEn || item.name}
+                    {getDishName(item)}
                   </div>
-                  {item.nameEn && item.nameId && (
-                    <div style={{ fontSize: '15px', color: '#666', fontWeight: '500' }}>{item.nameEn}</div>
-                  )}
-                  <div style={{ fontSize: '14px', color: '#888', marginTop: '4px' }}>中文：{item.name}</div>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
@@ -421,20 +452,16 @@ useEffect(() => {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, cursor: 'pointer' }} onClick={() => toggleOrder(item.id, item.isOrdered)}>
                     {item.isOrdered ? <CheckCircle2 color="#2e7d32" /> : <Circle color="#ccc" />}
                     {item.imageUrl && (
-                      <img src={getFullImageUrl(item.imageUrl)} alt={item.name} style={{ width: '50px', height: '50px', borderRadius: '6px', objectFit: 'cover' }} />
+                      <img src={getFullImageUrl(item.imageUrl)} alt={getDishName(item)} style={{ width: '50px', height: '50px', borderRadius: '6px', objectFit: 'cover' }} />
                     )}
                     <div>
+                      {/* 點餐模式：顯示目前選擇語言的菜名 */}
                       <div style={{ fontWeight: 'bold', color: item.isOrdered ? '#2e7d32' : '#333' }}>
-                        {item.name}
+                        {getDishName(item)}
                         <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888', background: '#f5f5f5', padding: '2px 6px', borderRadius: '4px' }}>
                           {item.category || '主菜'}
                         </span>
                       </div>
-                      {(item.nameEn || item.nameId) && (
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          {item.nameEn} {item.nameEn && item.nameId && '•'} {item.nameId}
-                        </div>
-                      )}
                       {item.sourceUrl && (
                         <a href={item.sourceUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: '12px', color: '#1976d2' }}>
                           食譜連結
