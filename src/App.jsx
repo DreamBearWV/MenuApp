@@ -101,15 +101,35 @@ export default function App() {
   };
 
   // 💡 自動更新機制：首次載入 + 每 5 秒自動在背景重新整理最新菜單
-  useEffect(() => {
-    fetchRecipes(true);
+  // 💡 自動更新機制（結合 Page Visibility API 省電優化）
+useEffect(() => {
+  // 1. 首次載入頁面時，抓取資料 (顯示 loading)
+  fetchRecipes(true);
 
-    const timer = setInterval(() => {
+  // 2. 定時器：每 5 秒觸發一次
+  const timer = setInterval(() => {
+    // 🛑 省電核心：如果畫面被隱藏（螢幕關閉、切換分頁），直接跳過更新
+    if (document.hidden) {
+      return;
+    }
+    fetchRecipes(false); // 在背景靜默更新
+  }, 5000);
+
+  // 3. 監聽頁面切換事件：當使用者重新回到這個網頁時，立刻抓取最新資料！
+  const handleVisibilityChange = () => {
+    if (!document.hidden) {
       fetchRecipes(false);
-    }, 5000);
+    }
+  };
 
-    return () => clearInterval(timer);
-  }, []);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+
+  // 4. 清除機制：元件卸載時清除定時器與監聽器
+  return () => {
+    clearInterval(timer);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+  };
+}, []);
 
   const openModal = (recipe = null) => {
     if (recipe) {
