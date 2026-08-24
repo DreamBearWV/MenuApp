@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Languages } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-const CATEGORIES = ['主菜', '蔬菜', '湯品', '其他'];
+const CATEGORIES = ['主菜', '蔬菜', '湯品', '點心/其他'];
 
 // 前端圖片壓縮 (限制寬度 500px, JPEG 品質 0.5)
 const compressAndConvertToBase64 = (file) => {
@@ -84,9 +84,10 @@ export default function App() {
     });
   };
 
-  const fetchRecipes = async () => {
+  // 抓取菜單資料 (首次載入顯示 loading，後續背景自動更新不跳出 loading)
+  const fetchRecipes = async (isInitial = false) => {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       const res = await fetch(`${API_BASE}/api/recipes`, {
         headers: { 'ngrok-skip-browser-warning': 'true' }
       });
@@ -95,12 +96,19 @@ export default function App() {
     } catch (err) {
       console.error('Fetch error:', err);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
+  // 💡 自動更新機制：首次載入 + 每 5 秒自動在背景重新整理最新菜單
   useEffect(() => {
-    fetchRecipes();
+    fetchRecipes(true);
+
+    const timer = setInterval(() => {
+      fetchRecipes(false);
+    }, 5000);
+
+    return () => clearInterval(timer);
   }, []);
 
   const openModal = (recipe = null) => {
@@ -183,7 +191,7 @@ export default function App() {
       });
 
       if (res.ok) {
-        fetchRecipes();
+        fetchRecipes(false);
         closeModal();
       } else {
         const errText = await res.text();
@@ -196,6 +204,9 @@ export default function App() {
 
   const toggleOrder = async (id, currentStatus) => {
     try {
+      // 先在前端畫面上即時切換勾選狀態，提升滑順度
+      setRecipes(recipes.map(r => r.id === id ? { ...r, isOrdered: !currentStatus } : r));
+
       const res = await fetch(`${API_BASE}/api/recipes/${id}/order`, {
         method: 'PATCH',
         headers: {
@@ -204,11 +215,12 @@ export default function App() {
         },
         body: JSON.stringify({ isOrdered: !currentStatus })
       });
-      if (res.ok) {
-        setRecipes(recipes.map(r => r.id === id ? { ...r, isOrdered: !currentStatus } : r));
+      if (!res.ok) {
+        fetchRecipes(false); // 若失敗則還原
       }
     } catch (err) {
       alert('更新失敗！');
+      fetchRecipes(false);
     }
   };
 
@@ -219,7 +231,7 @@ export default function App() {
         method: 'POST',
         headers: { 'ngrok-skip-browser-warning': 'true' }
       });
-      fetchRecipes();
+      fetchRecipes(false);
     } catch (err) {
       alert('重置失敗！');
     }
@@ -271,7 +283,7 @@ export default function App() {
       {isCookingMode ? (
         <div>
           <div style={{ background: '#fff3e0', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', color: '#e65100' }}>
-            👨‍🍳 提示：以下為今日已點菜色 (Dishes to cook today)
+            👨‍🍳 提示：以下為今日已點菜色，每 5 秒自動同步更新 (Dishes to cook today)
           </div>
           {orderedRecipes.length === 0 ? (
             <p style={{ textAlign: 'center', color: '#888', marginTop: '40px' }}>今日尚未點菜 (No dishes ordered today)</p>
