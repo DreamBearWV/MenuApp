@@ -3,7 +3,7 @@ import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckC
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-// 前端圖片壓縮並轉換為 Base64 (限制最大寬度 800px, JPEG 品質 0.7)
+// 前端圖片高強度壓縮並轉換為 Base64 (限制最大寬度 500px, JPEG 品質 0.5，控制體積在 50KB 以下)
 const compressAndConvertToBase64 = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -13,7 +13,7 @@ const compressAndConvertToBase64 = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 600; // 原為 800，改為 600
+        const MAX_WIDTH = 500;
         let width = img.width;
         let height = img.height;
 
@@ -27,7 +27,7 @@ const compressAndConvertToBase64 = (file) => {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        resolve(canvas.toDataURL('image/jpeg', 0.6));
+        resolve(canvas.toDataURL('image/jpeg', 0.5));
       };
       img.onerror = (error) => reject(error);
     };
@@ -39,16 +39,35 @@ const getFullImageUrl = (url) => url || '';
 
 export default function App() {
   const [recipes, setRecipes] = useState([]);
-  const [isCookingMode, setIsCookingMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+
+  // 1. 模式記憶邏輯：優先讀取網址參數 ?mode=cook，其次讀取 LocalStorage
+  const [isCookingMode, setIsCookingMode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'cook' || params.get('mode') === 'kitchen') {
+      return true;
+    }
+    const savedMode = localStorage.getItem('app_mode');
+    return savedMode === 'cook';
+  });
 
   const [activeModal, setActiveModal] = useState(null);
   const [formData, setFormData] = useState({ name: '', imageUrl: '', sourceUrl: '' });
 
-  const fetchRecipes = async () => {
+  // 切換模式並存入 LocalStorage
+  const toggleMode = () => {
+    setIsCookingMode(prev => {
+      const nextMode = !prev;
+      localStorage.setItem('app_mode', nextMode ? 'cook' : 'order');
+      return nextMode;
+    });
+  };
+
+  // 2. 靜默更新邏輯：isBackground 為 true 時不會觸發全頁載入中畫面
+  const fetchRecipes = async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       const res = await fetch(`${API_BASE}/api/recipes`, {
         headers: {
           'ngrok-skip-browser-warning': 'true'
@@ -59,12 +78,31 @@ export default function App() {
     } catch (err) {
       console.error('Fetch error:', err);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
+  // 3. 自動輪詢與亮屏自動更新
   useEffect(() => {
     fetchRecipes();
+
+    // 每 5 秒背景自動同步一次
+    const timer = setInterval(() => {
+      fetchRecipes(true);
+    }, 5000);
+
+    // 手機亮屏/回到分頁時立刻靜默刷新
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchRecipes(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const openModal = (recipe = null) => {
@@ -82,7 +120,6 @@ export default function App() {
     setFormData({ name: '', imageUrl: '', sourceUrl: '' });
   };
 
-  // 在前端直接壓縮照片並轉 Base64，不再依賴獨立的上傳 API
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -112,7 +149,7 @@ export default function App() {
           },
           body: JSON.stringify(formData)
         });
-        if (res.ok) fetchRecipes();
+        if (res.ok) fetchRecipes(true);
       } else {
         const res = await fetch(`${API_BASE}/api/recipes/${activeModal.id}`, {
           method: 'PUT',
@@ -122,7 +159,7 @@ export default function App() {
           },
           body: JSON.stringify(formData)
         });
-        if (res.ok) fetchRecipes();
+        if (res.ok) fetchRecipes(true);
       }
       closeModal();
     } catch (err) {
@@ -157,7 +194,7 @@ export default function App() {
           'ngrok-skip-browser-warning': 'true'
         }
       });
-      fetchRecipes();
+      fetchRecipes(true);
     } catch (err) {
       alert('重置失敗！');
     }
@@ -188,7 +225,7 @@ export default function App() {
           {isCookingMode ? '今日烹飪菜單 (Kitchen)' : '家庭點餐菜單'}
         </h1>
         <button
-          onClick={() => setIsCookingMode(!isCookingMode)}
+          onClick={toggleMode}
           style={{
             padding: '8px 12px',
             borderRadius: '20px',
