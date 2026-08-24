@@ -3,12 +3,39 @@ import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckC
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-// 輔助函式：確保圖片網址是完整的 (處理上傳的相對路徑)
-const getFullImageUrl = (url) => {
-  if (!url) return '';
-  if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  return `${API_BASE}${url}`;
+// 前端圖片壓縮並轉換為 Base64 (限制最大寬度 800px, JPEG 品質 0.7)
+const compressAndConvertToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = (error) => reject(error);
+    };
+    reader.onerror = (error) => reject(error);
+  });
 };
+
+const getFullImageUrl = (url) => url || '';
 
 export default function App() {
   const [recipes, setRecipes] = useState([]);
@@ -22,7 +49,11 @@ export default function App() {
   const fetchRecipes = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/recipes`);
+      const res = await fetch(`${API_BASE}/api/recipes`, {
+        headers: {
+          'ngrok-skip-browser-warning': 'true'
+        }
+      });
       const data = await res.json();
       setRecipes(data);
     } catch (err) {
@@ -51,31 +82,17 @@ export default function App() {
     setFormData({ name: '', imageUrl: '', sourceUrl: '' });
   };
 
+  // 在前端直接壓縮照片並轉 Base64，不再依賴獨立的上傳 API
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const data = new FormData();
-    data.append('image', file);
-
     try {
       setUploading(true);
-      const res = await fetch(`${API_BASE}/api/upload`, {
-        method: 'POST',
-        body: data
-      });
-      const result = await res.json();
-      if (res.ok && result.imageUrl) {
-  	const fullUrl = result.imageUrl.startsWith('http') 
-   	 ? result.imageUrl 
-    	 : `${API_BASE}${result.imageUrl}`;
-
- 	setFormData(prev => ({ ...prev, imageUrl: fullUrl }));
-	}else {
-        alert('照片上傳失敗');
-      }
+      const base64Image = await compressAndConvertToBase64(file);
+      setFormData(prev => ({ ...prev, imageUrl: base64Image }));
     } catch (err) {
-      alert('圖片上傳發生錯誤！');
+      alert('圖片處理失敗！');
     } finally {
       setUploading(false);
     }
@@ -89,14 +106,20 @@ export default function App() {
       if (activeModal === 'add') {
         const res = await fetch(`${API_BASE}/api/recipes`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true'
+          },
           body: JSON.stringify(formData)
         });
         if (res.ok) fetchRecipes();
       } else {
         const res = await fetch(`${API_BASE}/api/recipes/${activeModal.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true'
+          },
           body: JSON.stringify(formData)
         });
         if (res.ok) fetchRecipes();
@@ -111,7 +134,10 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/api/recipes/${id}/order`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
         body: JSON.stringify({ isOrdered: !currentStatus })
       });
       if (res.ok) {
@@ -125,7 +151,12 @@ export default function App() {
   const resetOrders = async () => {
     if (!confirm('確定要清空今日所有點餐嗎？')) return;
     try {
-      await fetch(`${API_BASE}/api/recipes/reset-orders`, { method: 'POST' });
+      await fetch(`${API_BASE}/api/recipes/reset-orders`, {
+        method: 'POST',
+        headers: {
+          'ngrok-skip-browser-warning': 'true'
+        }
+      });
       fetchRecipes();
     } catch (err) {
       alert('重置失敗！');
@@ -135,7 +166,12 @@ export default function App() {
   const deleteRecipe = async (id) => {
     if (!confirm('確定要刪除這道菜嗎？')) return;
     try {
-      await fetch(`${API_BASE}/api/recipes/${id}`, { method: 'DELETE' });
+      await fetch(`${API_BASE}/api/recipes/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'ngrok-skip-browser-warning': 'true'
+        }
+      });
       setRecipes(recipes.filter(r => r.id !== id));
     } catch (err) {
       alert('刪除失敗！');
@@ -297,7 +333,7 @@ export default function App() {
                 
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                   <label style={{ flex: 1, padding: '8px', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '6px', textAlign: 'center', cursor: 'pointer', fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-                    <Upload size={16} /> {uploading ? '上傳中...' : '從手機/電腦上傳照片'}
+                    <Upload size={16} /> {uploading ? '壓縮處理中...' : '從手機/電腦選擇照片'}
                     <input type="file" accept="image/*" onChange={handleFileUpload} style={{ display: 'none' }} disabled={uploading} />
                   </label>
                 </div>
