@@ -3,7 +3,10 @@ import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckC
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-// 前端圖片高強度壓縮並轉換為 Base64 (限制最大寬度 500px, JPEG 品質 0.5，控制體積在 50KB 以下)
+// 定義預設的菜色分類
+const CATEGORIES = ['全部', '主菜', '蔬菜', '湯品', '其他'];
+
+// 前端圖片壓縮並轉換為 Base64 (限制最大寬度 500px, JPEG 品質 0.5，確保低於 100KB)
 const compressAndConvertToBase64 = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -39,10 +42,9 @@ const getFullImageUrl = (url) => url || '';
 
 export default function App() {
   const [recipes, setRecipes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('全部');
 
-  // 1. 模式記憶邏輯：優先讀取網址參數 ?mode=cook，其次讀取 LocalStorage
+  // 模式初始狀態：優先讀取 URL 參數 ?mode=cook，其次讀取 LocalStorage 紀錄
   const [isCookingMode, setIsCookingMode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('mode') === 'cook' || params.get('mode') === 'kitchen') {
@@ -52,22 +54,15 @@ export default function App() {
     return savedMode === 'cook';
   });
 
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+
   const [activeModal, setActiveModal] = useState(null);
-  const [formData, setFormData] = useState({ name: '', imageUrl: '', sourceUrl: '' });
+  const [formData, setFormData] = useState({ name: '', category: '主菜', imageUrl: '', sourceUrl: '' });
 
-  // 切換模式並存入 LocalStorage
-  const toggleMode = () => {
-    setIsCookingMode(prev => {
-      const nextMode = !prev;
-      localStorage.setItem('app_mode', nextMode ? 'cook' : 'order');
-      return nextMode;
-    });
-  };
-
-  // 2. 靜默更新邏輯：isBackground 為 true 時不會觸發全頁載入中畫面
-  const fetchRecipes = async (isBackground = false) => {
+  const fetchRecipes = async () => {
     try {
-      if (!isBackground) setLoading(true);
+      setLoading(true);
       const res = await fetch(`${API_BASE}/api/recipes`, {
         headers: {
           'ngrok-skip-browser-warning': 'true'
@@ -78,46 +73,45 @@ export default function App() {
     } catch (err) {
       console.error('Fetch error:', err);
     } finally {
-      if (!isBackground) setLoading(false);
+      setLoading(false);
     }
   };
 
-  // 3. 自動輪詢與亮屏自動更新
   useEffect(() => {
     fetchRecipes();
-
-    // 每 5 秒背景自動同步一次
-    const timer = setInterval(() => {
-      fetchRecipes(true);
-    }, 5000);
-
-    // 手機亮屏/回到分頁時立刻靜默刷新
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        fetchRecipes(true);
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
   }, []);
+
+  const toggleMode = () => {
+    setIsCookingMode(prev => {
+      const nextMode = !prev;
+      localStorage.setItem('app_mode', nextMode ? 'cook' : 'order');
+      return nextMode;
+    });
+  };
 
   const openModal = (recipe = null) => {
     if (recipe) {
       setActiveModal(recipe);
-      setFormData({ name: recipe.name, imageUrl: recipe.imageUrl || '', sourceUrl: recipe.sourceUrl || '' });
+      setFormData({
+        name: recipe.name,
+        category: recipe.category || '主菜',
+        imageUrl: recipe.imageUrl || '',
+        sourceUrl: recipe.sourceUrl || ''
+      });
     } else {
       setActiveModal('add');
-      setFormData({ name: '', imageUrl: '', sourceUrl: '' });
+      setFormData({
+        name: '',
+        category: selectedCategory !== '全部' ? selectedCategory : '主菜',
+        imageUrl: '',
+        sourceUrl: ''
+      });
     }
   };
 
   const closeModal = () => {
     setActiveModal(null);
-    setFormData({ name: '', imageUrl: '', sourceUrl: '' });
+    setFormData({ name: '', category: '主菜', imageUrl: '', sourceUrl: '' });
   };
 
   const handleFileUpload = async (e) => {
@@ -149,7 +143,7 @@ export default function App() {
           },
           body: JSON.stringify(formData)
         });
-        if (res.ok) fetchRecipes(true);
+        if (res.ok) fetchRecipes();
       } else {
         const res = await fetch(`${API_BASE}/api/recipes/${activeModal.id}`, {
           method: 'PUT',
@@ -159,7 +153,7 @@ export default function App() {
           },
           body: JSON.stringify(formData)
         });
-        if (res.ok) fetchRecipes(true);
+        if (res.ok) fetchRecipes();
       }
       closeModal();
     } catch (err) {
@@ -194,7 +188,7 @@ export default function App() {
           'ngrok-skip-browser-warning': 'true'
         }
       });
-      fetchRecipes(true);
+      fetchRecipes();
     } catch (err) {
       alert('重置失敗！');
     }
@@ -214,6 +208,12 @@ export default function App() {
       alert('刪除失敗！');
     }
   };
+
+  // 依照選取的分類進行篩選
+  const filteredRecipes = recipes.filter(r => {
+    if (selectedCategory === '全部') return true;
+    return (r.category || '主菜') === selectedCategory;
+  });
 
   const orderedRecipes = recipes.filter(r => r.isOrdered);
 
@@ -253,7 +253,12 @@ export default function App() {
                 {item.imageUrl && (
                   <img src={getFullImageUrl(item.imageUrl)} alt={item.name} style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '12px' }} />
                 )}
-                <h2 style={{ margin: '0 0 12px 0', fontSize: '22px', color: '#333' }}>{item.name}</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                  <h2 style={{ margin: 0, fontSize: '22px', color: '#333' }}>{item.name}</h2>
+                  <span style={{ fontSize: '12px', background: '#ffe0b2', color: '#e65100', padding: '2px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
+                    {item.category || '主菜'}
+                  </span>
+                </div>
                 {item.sourceUrl && (
                   <a
                     href={item.sourceUrl}
@@ -280,7 +285,8 @@ export default function App() {
         </div>
       ) : (
         <div>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          {/* 功能按鈕列 */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
             <button
               onClick={() => openModal()}
               style={{ flex: 1, padding: '10px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}
@@ -295,13 +301,38 @@ export default function App() {
             </button>
           </div>
 
+          {/* 分類標籤切換列 */}
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '16px' }}>
+            {CATEGORIES.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '16px',
+                  border: 'none',
+                  background: selectedCategory === cat ? '#2e7d32' : '#f0f0f0',
+                  color: selectedCategory === cat ? '#fff' : '#555',
+                  fontWeight: selectedCategory === cat ? 'bold' : 'normal',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  fontSize: '14px'
+                }}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
           {loading ? (
             <p style={{ textAlign: 'center' }}>載入中...</p>
-          ) : recipes.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#888' }}>目前還沒有菜色，快點擊「新增菜色」吧！</p>
+          ) : filteredRecipes.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#888', margin: '40px 0' }}>
+              {selectedCategory === '全部' ? '目前還沒有菜色，快點擊「新增菜色」吧！' : `「${selectedCategory}」分類中目前沒有菜色`}
+            </p>
           ) : (
             <div style={{ display: 'grid', gap: '12px' }}>
-              {recipes.map(item => (
+              {filteredRecipes.map(item => (
                 <div
                   key={item.id}
                   style={{
@@ -321,11 +352,16 @@ export default function App() {
                     )}
                     <div>
                       <div style={{ fontWeight: 'bold', color: item.isOrdered ? '#2e7d32' : '#333' }}>{item.name}</div>
-                      {item.sourceUrl && (
-                        <a href={item.sourceUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: '12px', color: '#1976d2' }}>
-                          食譜連結
-                        </a>
-                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                        <span style={{ fontSize: '11px', background: '#e0e0e0', color: '#666', padding: '2px 6px', borderRadius: '4px' }}>
+                          {item.category || '主菜'}
+                        </span>
+                        {item.sourceUrl && (
+                          <a href={item.sourceUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: '12px', color: '#1976d2' }}>
+                            食譜連結
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -358,6 +394,19 @@ export default function App() {
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
                   placeholder="例如：番茄炒蛋"
                 />
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>菜色分類 *</label>
+                <select
+                  value={formData.category}
+                  onChange={e => setFormData({ ...formData, category: e.target.value })}
+                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', fontSize: '14px' }}
+                >
+                  {CATEGORIES.filter(c => c !== '全部').map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
               </div>
 
               <div style={{ marginBottom: '12px' }}>
