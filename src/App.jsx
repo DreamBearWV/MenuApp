@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload } from 'lucide-react';
+import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Languages } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-const CATEGORIES = ['主菜', '蔬菜', '湯品', '點心/其他'];
+const CATEGORIES = ['主菜', '蔬菜', '湯品', '其他'];
 
-// 前端圖片壓縮並轉換為 Base64 (限制最大寬度 500px, JPEG 品質 0.5，控制檔案在 50KB~80KB)
+// 前端圖片壓縮 (限制寬度 500px, JPEG 品質 0.5)
 const compressAndConvertToBase64 = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -36,15 +36,28 @@ const compressAndConvertToBase64 = (file) => {
   });
 };
 
+// 免費翻譯 API 輔助函式 (中文 -> 英文/印尼文)
+const translateText = async (text, targetLang) => {
+  try {
+    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=zh-TW|${targetLang}`);
+    const data = await res.json();
+    return data.responseData?.translatedText || '';
+  } catch (err) {
+    console.error('Translation error:', err);
+    return '';
+  }
+};
+
 const getFullImageUrl = (url) => url || '';
 
 export default function App() {
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [translating, setTranslating] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('全部');
 
-  // 模式記憶：優先讀取 URL 參數 ?mode=cook，其次讀取 LocalStorage 紀錄
+  // 模式記憶：優先讀取 URL 參數 ?mode=cook，其次讀取 LocalStorage
   const [isCookingMode, setIsCookingMode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('mode') === 'cook' || params.get('mode') === 'kitchen') {
@@ -54,9 +67,15 @@ export default function App() {
   });
 
   const [activeModal, setActiveModal] = useState(null);
-  const [formData, setFormData] = useState({ name: '', imageUrl: '', sourceUrl: '', category: '主菜' });
+  const [formData, setFormData] = useState({
+    name: '',
+    nameEn: '',
+    nameId: '',
+    imageUrl: '',
+    sourceUrl: '',
+    category: '主菜'
+  });
 
-  // 切換模式並儲存至 LocalStorage
   const toggleMode = () => {
     setIsCookingMode(prev => {
       const nextMode = !prev;
@@ -89,19 +108,45 @@ export default function App() {
       setActiveModal(recipe);
       setFormData({
         name: recipe.name || '',
+        nameEn: recipe.nameEn || '',
+        nameId: recipe.nameId || '',
         imageUrl: recipe.imageUrl || '',
         sourceUrl: recipe.sourceUrl || '',
         category: recipe.category || '主菜'
       });
     } else {
       setActiveModal('add');
-      setFormData({ name: '', imageUrl: '', sourceUrl: '', category: '主菜' });
+      setFormData({ name: '', nameEn: '', nameId: '', imageUrl: '', sourceUrl: '', category: '主菜' });
     }
   };
 
   const closeModal = () => {
     setActiveModal(null);
-    setFormData({ name: '', imageUrl: '', sourceUrl: '', category: '主菜' });
+    setFormData({ name: '', nameEn: '', nameId: '', imageUrl: '', sourceUrl: '', category: '主菜' });
+  };
+
+  // 自動將中文名稱翻譯為英文與印尼文
+  const handleAutoTranslate = async () => {
+    if (!formData.name.trim()) {
+      alert('請先輸入中文菜色名稱！');
+      return;
+    }
+    setTranslating(true);
+    try {
+      const [enResult, idResult] = await Promise.all([
+        translateText(formData.name, 'en'),
+        translateText(formData.name, 'id')
+      ]);
+      setFormData(prev => ({
+        ...prev,
+        nameEn: enResult || prev.nameEn,
+        nameId: idResult || prev.nameId
+      }));
+    } catch (err) {
+      alert('翻譯發生錯誤');
+    } finally {
+      setTranslating(false);
+    }
   };
 
   const handleFileUpload = async (e) => {
@@ -195,7 +240,6 @@ export default function App() {
 
   const orderedRecipes = recipes.filter(r => r.isOrdered);
   
-  // 依據選擇的分類進行過濾
   const filteredRecipes = selectedCategory === '全部'
     ? recipes
     : recipes.filter(r => (r.category || '主菜') === selectedCategory);
@@ -223,10 +267,11 @@ export default function App() {
         </button>
       </header>
 
+      {/* 工人烹飪模式 */}
       {isCookingMode ? (
         <div>
           <div style={{ background: '#fff3e0', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', color: '#e65100' }}>
-            👨‍🍳 提示：以下為今日已點菜色，點擊連結可查看食譜教學。
+            👨‍🍳 提示：以下為今日已點菜色 (Dishes to cook today)
           </div>
           {orderedRecipes.length === 0 ? (
             <p style={{ textAlign: 'center', color: '#888', marginTop: '40px' }}>今日尚未點菜 (No dishes ordered today)</p>
@@ -236,38 +281,51 @@ export default function App() {
                 {item.imageUrl && (
                   <img src={getFullImageUrl(item.imageUrl)} alt={item.name} style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '12px' }} />
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <h2 style={{ margin: 0, fontSize: '22px', color: '#333' }}>{item.name}</h2>
+                
+                {/* 烹飪模式：優先以大字顯示印尼文與英文 */}
+                <div style={{ marginBottom: '8px' }}>
+                  <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#e65100' }}>
+                    {item.nameId || item.nameEn || item.name}
+                  </div>
+                  {item.nameEn && item.nameId && (
+                    <div style={{ fontSize: '15px', color: '#666', fontWeight: '500' }}>{item.nameEn}</div>
+                  )}
+                  <div style={{ fontSize: '14px', color: '#888', marginTop: '4px' }}>中文：{item.name}</div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
                   <span style={{ fontSize: '12px', background: '#fff3e0', color: '#e65100', padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
                     {item.category || '主菜'}
                   </span>
+
+                  {item.sourceUrl && (
+                    <a
+                      href={item.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '8px 12px',
+                        background: '#ff9800',
+                        color: '#fff',
+                        borderRadius: '8px',
+                        textDecoration: 'none',
+                        fontWeight: 'bold',
+                        fontSize: '13px'
+                      }}
+                    >
+                      <ExternalLink size={16} /> 食譜教學 (Recipe)
+                    </a>
+                  )}
                 </div>
-                {item.sourceUrl && (
-                  <a
-                    href={item.sourceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '10px 16px',
-                      background: '#ff9800',
-                      color: '#fff',
-                      borderRadius: '8px',
-                      textDecoration: 'none',
-                      fontWeight: 'bold',
-                      marginTop: '8px'
-                    }}
-                  >
-                    <ExternalLink size={18} /> 查看食譜教學 (Recipe)
-                  </a>
-                )}
               </div>
             ))
           )}
         </div>
       ) : (
+        /* 點餐模式 */
         <div>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
             <button
@@ -284,7 +342,7 @@ export default function App() {
             </button>
           </div>
 
-          {/* 分類篩選標籤 */}
+          {/* 分類標籤 */}
           <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '12px', marginBottom: '12px' }}>
             {['全部', ...CATEGORIES].map(cat => (
               <button
@@ -340,6 +398,11 @@ export default function App() {
                           {item.category || '主菜'}
                         </span>
                       </div>
+                      {(item.nameEn || item.nameId) && (
+                        <div style={{ fontSize: '12px', color: '#666' }}>
+                          {item.nameEn} {item.nameEn && item.nameId && '•'} {item.nameId}
+                        </div>
+                      )}
                       {item.sourceUrl && (
                         <a href={item.sourceUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: '12px', color: '#1976d2' }}>
                           食譜連結
@@ -369,7 +432,28 @@ export default function App() {
             <h3>{activeModal === 'add' ? '新增菜色' : '編輯菜色'}</h3>
             <form onSubmit={handleSubmit}>
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>菜色名稱 *</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label style={{ fontSize: '14px' }}>中文菜名 *</label>
+                  <button
+                    type="button"
+                    onClick={handleAutoTranslate}
+                    disabled={translating}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '12px',
+                      background: '#e3f2fd',
+                      color: '#1976d2',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <Languages size={14} /> {translating ? '翻譯中...' : '一鍵自動翻譯'}
+                  </button>
+                </div>
                 <input
                   type="text"
                   required
@@ -377,6 +461,28 @@ export default function App() {
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
                   placeholder="例如：番茄炒蛋"
+                />
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>英文名稱 (English Name)</label>
+                <input
+                  type="text"
+                  value={formData.nameEn}
+                  onChange={e => setFormData({ ...formData, nameEn: e.target.value })}
+                  style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                  placeholder="例如：Stir-fried Eggs with Tomatoes"
+                />
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>印尼文名稱 (Nama Bahasa Indonesia)</label>
+                <input
+                  type="text"
+                  value={formData.nameId}
+                  onChange={e => setFormData({ ...formData, nameId: e.target.value })}
+                  style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                  placeholder="例如：Telur Tumis Tomat"
                 />
               </div>
 
