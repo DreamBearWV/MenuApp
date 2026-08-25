@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Languages, Globe } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-const CATEGORIES = ['主菜', '蔬菜', '湯品', '點心/其他'];
+const CATEGORIES = ['主菜', '蔬菜', '湯品', '其他'];
 
 // 前端圖片壓縮 (限制寬度 500px, JPEG 品質 0.5)
 const compressAndConvertToBase64 = (file) => {
@@ -36,16 +36,92 @@ const compressAndConvertToBase64 = (file) => {
   });
 };
 
-// 免費翻譯 API 輔助函式 (中文 -> 英文/印尼文)
+// ⚡ 雙引擎自動翻譯函式 (Google GTX 優先 -> MyMemory 備用)
 const translateText = async (text, targetLang) => {
+  if (!text || !text.trim()) return '';
+  const cleanText = text.trim();
+
+  // 嘗試 1: Google Translate GTX 引擎 (自動偵測源語言，支援度最高)
   try {
-    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=zh-TW|${targetLang}`);
-    const data = await res.json();
-    return data.responseData?.translatedText || '';
+    const googleUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(cleanText)}`;
+    const res = await fetch(googleUrl);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data[0]) {
+        const result = data[0].map(item => item[0]).join('');
+        if (result && result.trim()) {
+          console.log(`[Google 翻譯成功] "${cleanText}" (${targetLang}) -> "${result.trim()}"`);
+          return result.trim();
+        }
+      }
+    }
   } catch (err) {
-    console.error('Translation error:', err);
-    return '';
+    console.warn('Google 翻譯請求失敗，嘗試備用引擎 MyMemory...', err);
   }
+
+  // 嘗試 2: MyMemory API 備援方案 (將 zh-TW 轉為相容性較高的 zh)
+  try {
+    const myMemoryLang = targetLang === 'zh-TW' ? 'zh' : targetLang;
+    const res = await fetch(
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanText)}&langpair=autodetect|${myMemoryLang}`
+    );
+    const data = await res.json();
+    const result = data.responseData?.translatedText;
+    if (result && !result.includes('INVALID') && !result.includes('MYMEMORY')) {
+      console.log(`[MyMemory 翻譯成功] "${cleanText}" (${targetLang}) -> "${result.trim()}"`);
+      return result.trim();
+    }
+  } catch (err) {
+    console.error('MyMemory 翻譯亦失敗:', err);
+  }
+
+  return '';
+};
+
+// 背景自動補齊三語翻譯
+const prepareFormDataWithTranslations = async (currentFormData) => {
+  let sourceText = '';
+
+  // 尋找第一個有填寫的菜名作為源文字
+  if (currentFormData.name?.trim()) {
+    sourceText = currentFormData.name.trim();
+  } else if (currentFormData.nameEn?.trim()) {
+    sourceText = currentFormData.nameEn.trim();
+  } else if (currentFormData.nameId?.trim()) {
+    sourceText = currentFormData.nameId.trim();
+  }
+
+  if (!sourceText) return currentFormData;
+
+  const autoCompletedData = { ...currentFormData };
+  const tasks = [];
+  const fields = [];
+
+  // 若欄位未填寫，自動加入背景翻譯任務
+  if (!currentFormData.name?.trim()) {
+    fields.push('name');
+    tasks.push(translateText(sourceText, 'zh-TW'));
+  }
+  if (!currentFormData.nameEn?.trim()) {
+    fields.push('nameEn');
+    tasks.push(translateText(sourceText, 'en'));
+  }
+  if (!currentFormData.nameId?.trim()) {
+    fields.push('nameId');
+    tasks.push(translateText(sourceText, 'id'));
+  }
+
+  if (tasks.length === 0) return currentFormData;
+
+  // 並行發送翻譯請求
+  const results = await Promise.all(tasks);
+  fields.forEach((field, index) => {
+    if (results[index]) {
+      autoCompletedData[field] = results[index];
+    }
+  });
+
+  return autoCompletedData;
 };
 
 const getFullImageUrl = (url) => url || '';
@@ -57,7 +133,7 @@ export default function App() {
   const [translating, setTranslating] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('全部');
 
-  // 🌐 語言選擇記憶：優先讀取 LocalStorage，預設為中文 'zh' ('zh' | 'en' | 'id')
+  // 🌐 語言選擇：優先讀取 LocalStorage，預設為中文 'zh' ('zh' | 'en' | 'id')
   const [lang, setLang] = useState(() => {
     return localStorage.getItem('app_lang') || 'zh';
   });
@@ -117,12 +193,11 @@ export default function App() {
     }
   };
 
-  // 💡 自動更新機制（結合 Page Visibility API 省電優化）
+  // 自動輪詢更新機制
   useEffect(() => {
     fetchRecipes(true);
 
     const timer = setInterval(() => {
-      // 畫面隱藏（關屏/切分頁）時暫停背景抓取，達到省電效果
       if (document.hidden) return;
       fetchRecipes(false);
     }, 5000);
@@ -163,22 +238,17 @@ export default function App() {
     setFormData({ name: '', nameEn: '', nameId: '', imageUrl: '', sourceUrl: '', category: '主菜' });
   };
 
+  // 手動預覽翻譯
   const handleAutoTranslate = async () => {
-    if (!formData.name.trim()) {
-      alert('請先輸入中文菜色名稱！');
+    if (!formData.name.trim() && !formData.nameEn.trim() && !formData.nameId.trim()) {
+      alert('請至少輸入一種語言的菜色名稱！');
       return;
     }
+
     setTranslating(true);
     try {
-      const [enResult, idResult] = await Promise.all([
-        translateText(formData.name, 'en'),
-        translateText(formData.name, 'id')
-      ]);
-      setFormData(prev => ({
-        ...prev,
-        nameEn: enResult || prev.nameEn,
-        nameId: idResult || prev.nameId
-      }));
+      const translated = await prepareFormDataWithTranslations(formData);
+      setFormData(translated);
     } catch (err) {
       alert('翻譯發生錯誤');
     } finally {
@@ -201,11 +271,23 @@ export default function App() {
     }
   };
 
+  // ⚡ 儲存時自動進行背景翻譯並寫入資料庫
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim()) return;
+
+    if (!formData.name.trim() && !formData.nameEn.trim() && !formData.nameId.trim()) {
+      alert('請至少輸入一種語言的菜色名稱！');
+      return;
+    }
 
     try {
+      setUploading(true);
+
+      // 1. 背景自動補齊三語翻譯
+      const finalFormData = await prepareFormDataWithTranslations(formData);
+      console.log('準備存入 SQLite 的資料:', finalFormData);
+
+      // 2. 打 API 寫入樹莓派 Server.js
       const isAdd = activeModal === 'add';
       const url = isAdd ? `${API_BASE}/api/recipes` : `${API_BASE}/api/recipes/${activeModal.id}`;
       const method = isAdd ? 'POST' : 'PUT';
@@ -216,18 +298,20 @@ export default function App() {
           'Content-Type': 'application/json',
           'ngrok-skip-browser-warning': 'true'
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(finalFormData)
       });
 
       if (res.ok) {
-        fetchRecipes(false);
+        await fetchRecipes(false); // 確保列表更新完成
         closeModal();
       } else {
         const errText = await res.text();
         alert(`儲存失敗 (HTTP ${res.status}):\n${errText || '後端資料庫拒絕寫入'}`);
       }
     } catch (err) {
-      alert(`連線失敗: ${err.message}`);
+      alert(`連線或翻譯失敗: ${err.message}`);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -294,7 +378,7 @@ export default function App() {
         </h1>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* 🌐 語言選單 (具記憶功能) */}
+          {/* 🌐 語言切換選單 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#f5f5f5', padding: '4px 8px', borderRadius: '16px', border: '1px solid #ddd' }}>
             <Globe size={14} color="#666" />
             <select
@@ -349,7 +433,6 @@ export default function App() {
                   <img src={getFullImageUrl(item.imageUrl)} alt={getDishName(item)} style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '12px' }} />
                 )}
                 
-                {/* 烹飪模式：根據選取的語言以大字顯示菜名 */}
                 <div style={{ marginBottom: '8px' }}>
                   <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#e65100' }}>
                     {getDishName(item)}
@@ -455,7 +538,6 @@ export default function App() {
                       <img src={getFullImageUrl(item.imageUrl)} alt={getDishName(item)} style={{ width: '50px', height: '50px', borderRadius: '6px', objectFit: 'cover' }} />
                     )}
                     <div>
-                      {/* 點餐模式：顯示目前選擇語言的菜名 */}
                       <div style={{ fontWeight: 'bold', color: item.isOrdered ? '#2e7d32' : '#333' }}>
                         {getDishName(item)}
                         <span style={{ marginLeft: '8px', fontSize: '11px', color: '#888', background: '#f5f5f5', padding: '2px 6px', borderRadius: '4px' }}>
@@ -492,11 +574,11 @@ export default function App() {
             <form onSubmit={handleSubmit}>
               <div style={{ marginBottom: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <label style={{ fontSize: '14px' }}>中文菜名 *</label>
+                  <label style={{ fontSize: '14px' }}>中文菜名</label>
                   <button
                     type="button"
                     onClick={handleAutoTranslate}
-                    disabled={translating}
+                    disabled={translating || uploading}
                     style={{
                       padding: '4px 8px',
                       fontSize: '12px',
@@ -510,16 +592,15 @@ export default function App() {
                       gap: '4px'
                     }}
                   >
-                    <Languages size={14} /> {translating ? '翻譯中...' : '一鍵自動翻譯'}
+                    <Languages size={14} /> {translating ? '翻譯中...' : '預覽翻譯'}
                   </button>
                 </div>
                 <input
                   type="text"
-                  required
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                  placeholder="例如：番茄炒蛋"
+                  placeholder="例如：宮保雞丁"
                 />
               </div>
 
@@ -530,7 +611,7 @@ export default function App() {
                   value={formData.nameEn}
                   onChange={e => setFormData({ ...formData, nameEn: e.target.value })}
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                  placeholder="例如：Stir-fried Eggs with Tomatoes"
+                  placeholder="留空將自動翻譯 (例如: Kung Pao Chicken)"
                 />
               </div>
 
@@ -541,7 +622,7 @@ export default function App() {
                   value={formData.nameId}
                   onChange={e => setFormData({ ...formData, nameId: e.target.value })}
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                  placeholder="例如：Telur Tumis Tomat"
+                  placeholder="留空將自動翻譯 (例如: Ayam Kung Pao)"
                 />
               </div>
 
@@ -568,7 +649,7 @@ export default function App() {
                 
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                   <label style={{ flex: 1, padding: '8px', background: '#f0f0f0', border: '1px solid #ccc', borderRadius: '6px', textAlign: 'center', cursor: 'pointer', fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-                    <Upload size={16} /> {uploading ? '壓縮處理中...' : '從手機/電腦選擇照片'}
+                    <Upload size={16} /> {uploading ? '處理中...' : '從手機/電腦選擇照片'}
                     <input type="file" accept="image/*" onChange={handleFileUpload} style={{ display: 'none' }} disabled={uploading} />
                   </label>
                 </div>
@@ -595,8 +676,12 @@ export default function App() {
 
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                 <button type="button" onClick={closeModal} style={{ padding: '8px 16px', background: '#eee', border: 'none', borderRadius: '6px' }}>取消</button>
-                <button type="submit" disabled={uploading} style={{ padding: '8px 16px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px' }}>
-                  {activeModal === 'add' ? '儲存新增' : '更新資料'}
+                <button 
+                  type="submit" 
+                  disabled={uploading || translating} 
+                  style={{ padding: '8px 16px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  {uploading ? '自動翻譯與儲存中...' : (activeModal === 'add' ? '儲存新增' : '更新資料')}
                 </button>
               </div>
             </form>
