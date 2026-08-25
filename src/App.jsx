@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Languages, Globe } from 'lucide-react';
+import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Globe } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 const CATEGORIES = ['主菜', '蔬菜', '湯品', '其他'];
 
-// 前端圖片壓縮 (限制寬度 500px, JPEG 品質 0.5)
+// 前端圖片壓縮
 const compressAndConvertToBase64 = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -36,92 +36,78 @@ const compressAndConvertToBase64 = (file) => {
   });
 };
 
-// ⚡ 雙引擎自動翻譯函式 (Google GTX 優先 -> MyMemory 備用)
-const translateText = async (text, targetLang) => {
+// ⚡ 穩定版背景翻譯 API (自動相容 zh / en / id)
+const translateText = async (text, targetLang, sourceLang = 'zh') => {
   if (!text || !text.trim()) return '';
   const cleanText = text.trim();
 
-  // 嘗試 1: Google Translate GTX 引擎 (自動偵測源語言，支援度最高)
-  try {
-    const googleUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(cleanText)}`;
-    const res = await fetch(googleUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data[0]) {
-        const result = data[0].map(item => item[0]).join('');
-        if (result && result.trim()) {
-          console.log(`[Google 翻譯成功] "${cleanText}" (${targetLang}) -> "${result.trim()}"`);
-          return result.trim();
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('Google 翻譯請求失敗，嘗試備用引擎 MyMemory...', err);
-  }
+  const src = sourceLang === 'zh-TW' ? 'zh' : sourceLang;
+  const tgt = targetLang === 'zh-TW' ? 'zh' : targetLang;
 
-  // 嘗試 2: MyMemory API 備援方案 (將 zh-TW 轉為相容性較高的 zh)
+  // 1. MyMemory API
   try {
-    const myMemoryLang = targetLang === 'zh-TW' ? 'zh' : targetLang;
-    const res = await fetch(
-      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanText)}&langpair=autodetect|${myMemoryLang}`
-    );
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanText)}&langpair=${src}|${tgt}`;
+    const res = await fetch(url);
     const data = await res.json();
-    const result = data.responseData?.translatedText;
-    if (result && !result.includes('INVALID') && !result.includes('MYMEMORY')) {
-      console.log(`[MyMemory 翻譯成功] "${cleanText}" (${targetLang}) -> "${result.trim()}"`);
-      return result.trim();
+    
+    if (data?.responseData?.translatedText && !data.responseData.translatedText.includes('MYMEMORY WARNING')) {
+      console.log(`[背景翻譯成功] ${cleanText} (${src} -> ${tgt}):`, data.responseData.translatedText);
+      return data.responseData.translatedText;
     }
-  } catch (err) {
-    console.error('MyMemory 翻譯亦失敗:', err);
+  } catch (e) {
+    console.warn('MyMemory 翻譯連線失敗:', e);
   }
 
-  return '';
+  // 2. 備援 Google GTX
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${src}&tl=${tgt}&dt=t&q=${encodeURIComponent(cleanText)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data && data[0] && data[0][0] && data[0][0][0]) {
+      const result = data[0].map(item => item[0]).join('');
+      console.log(`[Google 備援翻譯成功] ${cleanText}:`, result);
+      return result;
+    }
+  } catch (e) {
+    console.warn('Google 翻譯連線失敗:', e);
+  }
+
+  return cleanText; // 萬一翻譯 API 皆無法連線，回傳原文避免寫入空白
 };
 
-// 背景自動補齊三語翻譯
+// ⚡ 按下「儲存」時自動執行的背景翻譯邏輯
 const prepareFormDataWithTranslations = async (currentFormData) => {
   let sourceText = '';
+  let sourceLang = 'zh';
 
-  // 尋找第一個有填寫的菜名作為源文字
+  // 判斷使用者填了哪一種語言作為翻譯來源
   if (currentFormData.name?.trim()) {
     sourceText = currentFormData.name.trim();
+    sourceLang = 'zh';
   } else if (currentFormData.nameEn?.trim()) {
     sourceText = currentFormData.nameEn.trim();
+    sourceLang = 'en';
   } else if (currentFormData.nameId?.trim()) {
     sourceText = currentFormData.nameId.trim();
+    sourceLang = 'id';
   }
 
   if (!sourceText) return currentFormData;
 
-  const autoCompletedData = { ...currentFormData };
-  const tasks = [];
-  const fields = [];
+  const updatedData = { ...currentFormData };
 
-  // 若欄位未填寫，自動加入背景翻譯任務
-  if (!currentFormData.name?.trim()) {
-    fields.push('name');
-    tasks.push(translateText(sourceText, 'zh-TW'));
+  // 背景自動補齊缺失的語言
+  if (!updatedData.name?.trim()) {
+    updatedData.name = await translateText(sourceText, 'zh', sourceLang);
   }
-  if (!currentFormData.nameEn?.trim()) {
-    fields.push('nameEn');
-    tasks.push(translateText(sourceText, 'en'));
+  if (!updatedData.nameEn?.trim()) {
+    updatedData.nameEn = await translateText(sourceText, 'en', sourceLang);
   }
-  if (!currentFormData.nameId?.trim()) {
-    fields.push('nameId');
-    tasks.push(translateText(sourceText, 'id'));
+  if (!updatedData.nameId?.trim()) {
+    updatedData.nameId = await translateText(sourceText, 'id', sourceLang);
   }
 
-  if (tasks.length === 0) return currentFormData;
-
-  // 並行發送翻譯請求
-  const results = await Promise.all(tasks);
-  fields.forEach((field, index) => {
-    if (results[index]) {
-      autoCompletedData[field] = results[index];
-    }
-  });
-
-  return autoCompletedData;
+  return updatedData;
 };
 
 const getFullImageUrl = (url) => url || '';
@@ -130,10 +116,9 @@ export default function App() {
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [translating, setTranslating] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('全部');
 
-  // 🌐 語言選擇：優先讀取 LocalStorage，預設為中文 'zh' ('zh' | 'en' | 'id')
+  // 🌐 語言選擇：預設為中文 'zh' ('zh' | 'en' | 'id')
   const [lang, setLang] = useState(() => {
     return localStorage.getItem('app_lang') || 'zh';
   });
@@ -143,7 +128,7 @@ export default function App() {
     localStorage.setItem('app_lang', newLang);
   };
 
-  // 模式記憶：優先讀取 URL 參數 ?mode=cook，其次讀取 LocalStorage
+  // 模式記憶
   const [isCookingMode, setIsCookingMode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('mode') === 'cook' || params.get('mode') === 'kitchen') {
@@ -170,7 +155,7 @@ export default function App() {
     });
   };
 
-  // 根據選擇的語言取得菜色名稱 (支援自動降級退回中文)
+  // 根據切換的語言顯示對應菜名
   const getDishName = (item) => {
     if (lang === 'en') return item.nameEn || item.name;
     if (lang === 'id') return item.nameId || item.nameEn || item.name;
@@ -193,27 +178,12 @@ export default function App() {
     }
   };
 
-  // 自動輪詢更新機制
   useEffect(() => {
     fetchRecipes(true);
-
     const timer = setInterval(() => {
-      if (document.hidden) return;
-      fetchRecipes(false);
+      if (!document.hidden) fetchRecipes(false);
     }, 5000);
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        fetchRecipes(false);
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
+    return () => clearInterval(timer);
   }, []);
 
   const openModal = (recipe = null) => {
@@ -238,24 +208,6 @@ export default function App() {
     setFormData({ name: '', nameEn: '', nameId: '', imageUrl: '', sourceUrl: '', category: '主菜' });
   };
 
-  // 手動預覽翻譯
-  const handleAutoTranslate = async () => {
-    if (!formData.name.trim() && !formData.nameEn.trim() && !formData.nameId.trim()) {
-      alert('請至少輸入一種語言的菜色名稱！');
-      return;
-    }
-
-    setTranslating(true);
-    try {
-      const translated = await prepareFormDataWithTranslations(formData);
-      setFormData(translated);
-    } catch (err) {
-      alert('翻譯發生錯誤');
-    } finally {
-      setTranslating(false);
-    }
-  };
-
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -271,7 +223,7 @@ export default function App() {
     }
   };
 
-  // ⚡ 儲存時自動進行背景翻譯並寫入資料庫
+  // ⚡【核心】按下「儲存新增」時，自動背景翻譯並寫入樹莓派 SQLite
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -281,13 +233,13 @@ export default function App() {
     }
 
     try {
-      setUploading(true);
+      setUploading(true); // 按鈕顯示「儲存與自動翻譯中...」
 
-      // 1. 背景自動補齊三語翻譯
+      // 1. 在背景自動完成三語翻譯
       const finalFormData = await prepareFormDataWithTranslations(formData);
-      console.log('準備存入 SQLite 的資料:', finalFormData);
+      console.log('即將存入 SQLite 的完整資料:', finalFormData);
 
-      // 2. 打 API 寫入樹莓派 Server.js
+      // 2. 送出給樹莓派 Server.js 寫入 recipes.db
       const isAdd = activeModal === 'add';
       const url = isAdd ? `${API_BASE}/api/recipes` : `${API_BASE}/api/recipes/${activeModal.id}`;
       const method = isAdd ? 'POST' : 'PUT';
@@ -302,14 +254,14 @@ export default function App() {
       });
 
       if (res.ok) {
-        await fetchRecipes(false); // 確保列表更新完成
+        await fetchRecipes(false); // 刷新菜單列表
         closeModal();
       } else {
         const errText = await res.text();
-        alert(`儲存失敗 (HTTP ${res.status}):\n${errText || '後端資料庫拒絕寫入'}`);
+        alert(`儲存失敗: ${errText}`);
       }
     } catch (err) {
-      alert(`連線或翻譯失敗: ${err.message}`);
+      alert(`連線或翻譯發生錯誤: ${err.message}`);
     } finally {
       setUploading(false);
     }
@@ -318,8 +270,7 @@ export default function App() {
   const toggleOrder = async (id, currentStatus) => {
     try {
       setRecipes(recipes.map(r => r.id === id ? { ...r, isOrdered: !currentStatus } : r));
-
-      const res = await fetch(`${API_BASE}/api/recipes/${id}/order`, {
+      await fetch(`${API_BASE}/api/recipes/${id}/order`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -327,9 +278,6 @@ export default function App() {
         },
         body: JSON.stringify({ isOrdered: !currentStatus })
       });
-      if (!res.ok) {
-        fetchRecipes(false);
-      }
     } catch (err) {
       alert('更新失敗！');
       fetchRecipes(false);
@@ -363,14 +311,13 @@ export default function App() {
   };
 
   const orderedRecipes = recipes.filter(r => r.isOrdered);
-  
   const filteredRecipes = selectedCategory === '全部'
     ? recipes
     : recipes.filter(r => (r.category || '主菜') === selectedCategory);
 
   return (
     <div style={{ maxWidth: '600px', margin: '0 auto', padding: '16px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      {/* 頁首選單欄位 */}
+      {/* 頁首 */}
       <header style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
         <h1 style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
           {isCookingMode ? <ChefHat color="#e65100" /> : <Utensils color="#2e7d32" />}
@@ -378,7 +325,7 @@ export default function App() {
         </h1>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* 🌐 語言切換選單 */}
+          {/* 🌐 語言選擇選單 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#f5f5f5', padding: '4px 8px', borderRadius: '16px', border: '1px solid #ddd' }}>
             <Globe size={14} color="#666" />
             <select
@@ -399,7 +346,6 @@ export default function App() {
             </select>
           </div>
 
-          {/* 模式切換按鈕 */}
           <button
             onClick={toggleMode}
             style={{
@@ -573,56 +519,35 @@ export default function App() {
             <h3>{activeModal === 'add' ? '新增菜色' : '編輯菜色'}</h3>
             <form onSubmit={handleSubmit}>
               <div style={{ marginBottom: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <label style={{ fontSize: '14px' }}>中文菜名</label>
-                  <button
-                    type="button"
-                    onClick={handleAutoTranslate}
-                    disabled={translating || uploading}
-                    style={{
-                      padding: '4px 8px',
-                      fontSize: '12px',
-                      background: '#e3f2fd',
-                      color: '#1976d2',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                  >
-                    <Languages size={14} /> {translating ? '翻譯中...' : '預覽翻譯'}
-                  </button>
-                </div>
+                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>中文菜名</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                  placeholder="例如：宮保雞丁"
+                  placeholder="例如：紅燒牛肉"
                 />
               </div>
 
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>英文名稱 (English Name)</label>
+                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>英文名稱 (可留空，儲存時自動翻譯)</label>
                 <input
                   type="text"
                   value={formData.nameEn}
                   onChange={e => setFormData({ ...formData, nameEn: e.target.value })}
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                  placeholder="留空將自動翻譯 (例如: Kung Pao Chicken)"
+                  placeholder="留空將由系統自動翻譯"
                 />
               </div>
 
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>印尼文名稱 (Nama Bahasa Indonesia)</label>
+                <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>印尼文名稱 (可留空，儲存時自動翻譯)</label>
                 <input
                   type="text"
                   value={formData.nameId}
                   onChange={e => setFormData({ ...formData, nameId: e.target.value })}
                   style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                  placeholder="留空將自動翻譯 (例如: Ayam Kung Pao)"
+                  placeholder="留空將由系統自動翻譯"
                 />
               </div>
 
@@ -678,10 +603,10 @@ export default function App() {
                 <button type="button" onClick={closeModal} style={{ padding: '8px 16px', background: '#eee', border: 'none', borderRadius: '6px' }}>取消</button>
                 <button 
                   type="submit" 
-                  disabled={uploading || translating} 
+                  disabled={uploading} 
                   style={{ padding: '8px 16px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
                 >
-                  {uploading ? '自動翻譯與儲存中...' : (activeModal === 'add' ? '儲存新增' : '更新資料')}
+                  {uploading ? '背景翻譯與儲存中...' : (activeModal === 'add' ? '儲存新增' : '更新資料')}
                 </button>
               </div>
             </form>
