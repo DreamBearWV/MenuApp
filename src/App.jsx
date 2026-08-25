@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Languages, Globe } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-const CATEGORIES = ['主菜', '蔬菜', '湯品', '其他'];
+const CATEGORIES = ['主菜', '蔬菜', '湯品', '點心/其他'];
 
 // 前端圖片壓縮 (限制寬度 500px, JPEG 品質 0.5)
 const compressAndConvertToBase64 = (file) => {
@@ -37,13 +37,9 @@ const compressAndConvertToBase64 = (file) => {
 };
 
 // 免費翻譯 API 輔助函式 (中文 -> 英文/印尼文)
-// 在參數列補上第 3 個參數 sourceLang，並給它預設值 'zh-TW'
-const translateText = async (text, targetLang, sourceLang = 'zh-TW') => {
+const translateText = async (text, targetLang) => {
   try {
-    // 把原本寫死的 zh-TW 改成動態變數 ${sourceLang}
-    const res = await fetch(
-      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`
-    );
+    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=zh-TW|${targetLang}`);
     const data = await res.json();
     return data.responseData?.translatedText || '';
   } catch (err) {
@@ -51,7 +47,6 @@ const translateText = async (text, targetLang, sourceLang = 'zh-TW') => {
     return '';
   }
 };
-
 
 const getFullImageUrl = (url) => url || '';
 
@@ -169,73 +164,27 @@ export default function App() {
   };
 
   const handleAutoTranslate = async () => {
-  // 1. 找出第一個有填寫的菜名與對應的語言代碼
-  let sourceText = '';
-  let sourceLang = '';
-
-  if (formData.name?.trim()) {
-    sourceText = formData.name.trim();
-    sourceLang = 'zh-TW'; // 中文
-  } else if (formData.nameEn?.trim()) {
-    sourceText = formData.nameEn.trim();
-    sourceLang = 'en';    // 英文
-  } else if (formData.nameId?.trim()) {
-    sourceText = formData.nameId.trim();
-    sourceLang = 'id';    // 印尼文
-  }
-
-  // 2. 如果三個欄位都是空的，才跳出警告並終止
-  if (!sourceText) {
-    alert('請至少輸入一種語言的菜色名稱！');
-    return;
-  }
-
-  setTranslating(true);
-  try {
-    // 3. 準備儲存翻譯結果的物件
-    const newTranslations = {};
-
-    // 4. 根據「源頭語言」決定需要翻譯哪兩個目標語言
-    // 提示：這裏使用的是前面修改過、支援 sourceLang 參數的 translateText(text, targetLang, sourceLang)
-    const tasks = [];
-    const targets = [];
-
-    if (sourceLang !== 'zh-TW') {
-      targets.push('zh-TW');
-      tasks.push(translateText(sourceText, 'zh-TW', sourceLang));
+    if (!formData.name.trim()) {
+      alert('請先輸入中文菜色名稱！');
+      return;
     }
-    if (sourceLang !== 'en') {
-      targets.push('en');
-      tasks.push(translateText(sourceText, 'en', sourceLang));
+    setTranslating(true);
+    try {
+      const [enResult, idResult] = await Promise.all([
+        translateText(formData.name, 'en'),
+        translateText(formData.name, 'id')
+      ]);
+      setFormData(prev => ({
+        ...prev,
+        nameEn: enResult || prev.nameEn,
+        nameId: idResult || prev.nameId
+      }));
+    } catch (err) {
+      alert('翻譯發生錯誤');
+    } finally {
+      setTranslating(false);
     }
-    if (sourceLang !== 'id') {
-      targets.push('id');
-      tasks.push(translateText(sourceText, 'id', sourceLang));
-    }
-
-    // 同時發送另外兩種語言的翻譯請求
-    const results = await Promise.all(tasks);
-
-    // 將結果映射回對應的欄位名稱
-    targets.forEach((lang, index) => {
-      if (lang === 'zh-TW') newTranslations.name = results[index];
-      if (lang === 'en') newTranslations.nameEn = results[index];
-      if (lang === 'id') newTranslations.nameId = results[index];
-    });
-
-    // 5. 更新表單（只更新被翻譯的欄位，源頭欄位保持不變）
-    setFormData(prev => ({
-      ...prev,
-      ...newTranslations
-    }));
-
-  } catch (err) {
-    alert('翻譯發生錯誤');
-  } finally {
-    setTranslating(false);
-  }
-};
-
+  };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
