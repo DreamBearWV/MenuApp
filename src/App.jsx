@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router'; // 👈 從 'react-router' 匯入 Hook
 import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Globe } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-const CATEGORIES = ['主菜', '蔬菜', '湯品', '甜品', '其他'];
+const CATEGORIES = ['主菜', '蔬菜', '湯品', '其他'];
 
 // 前端圖片壓縮
 const compressAndConvertToBase64 = (file) => {
@@ -112,11 +111,8 @@ const prepareFormDataWithTranslations = async (currentFormData) => {
 };
 
 const getFullImageUrl = (url) => url || '';
-// 1. 處理網址 URL 參數
-  const [searchParams, setSearchParams] = useSearchParams();
-  const isCookingMode = searchParams.get('mode') === 'cook';
 
-  // 2. 處理內部狀態
+export default function App() {
   const [recipes, setRecipes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -152,19 +148,12 @@ const getFullImageUrl = (url) => url || '';
   });
 
   const toggleMode = () => {
-    if (isCookingMode) {
-          // 切回點餐模式
-          searchParams.delete('mode');
-          setSearchParams(searchParams);
-          localStorage.setItem('app_mode', 'order');
-        } else {
-          // 切換至烹飪模式
-          searchParams.set('mode', 'cook');
-          setSearchParams(searchParams);
-          localStorage.setItem('app_mode', 'cook');
-        }
-      };
-
+    setIsCookingMode(prev => {
+      const nextMode = !prev;
+      localStorage.setItem('app_mode', nextMode ? 'cook' : 'order');
+      return nextMode;
+    });
+  };
 
   // 根據切換的語言顯示對應菜名
   const getDishName = (item) => {
@@ -356,7 +345,7 @@ const getFullImageUrl = (url) => url || '';
               <option value="id">Bahasa Indonesia</option>
             </select>
           </div>
- 
+
           <button
             onClick={toggleMode}
             style={{
