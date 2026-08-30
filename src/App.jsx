@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChefHat, Utensils, Plus, Trash2, Edit3, ExternalLink, RefreshCw, CheckCircle2, Circle, Upload, Globe } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
-const CATEGORIES = ['主菜', '蔬菜', '湯品', '其他'];
+const CATEGORIES = ['主菜', '蔬菜', '湯品', '甜品', '其他'];
 
 // 前端圖片壓縮
 const compressAndConvertToBase64 = (file) => {
